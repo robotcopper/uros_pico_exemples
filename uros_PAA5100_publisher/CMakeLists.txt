@@ -12,7 +12,7 @@ link_directories(libmicroros)
 add_executable(main
         publisher.cpp
         pico_uart_transport/pico_uart_transport.c
-        breakout_paa5100/drivers/pmw3901/pmw3901.cpp
+        pimoroni-pico/drivers/pmw3901/pmw3901.cpp
         )
 
 target_link_libraries(main
@@ -25,7 +25,7 @@ target_link_libraries(main
 target_include_directories(main PUBLIC
     libmicroros/include
     pico_uart_transport
-    breakout_paa5100/drivers/pmw3901
+    pimoroni-pico
 )
 
 pico_add_extra_outputs(main)

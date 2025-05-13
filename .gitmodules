@@ -1,3 +1,6 @@
 [submodule "uros_BNO085/BNO08x_Pico_Library"]
 	path = uros_BNO085/BNO08x_Pico_Library
 	url = https://github.com/robotcopper/BNO08x_Pico_Library.git
+[submodule "uros_PAA5100_publisher/pimoroni-pico"]
+	path = uros_PAA5100_publisher/pimoroni-pico
+	url = https://github.com/pimoroni/pimoroni-pico.git

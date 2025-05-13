@@ -16,7 +16,7 @@ extern"C"{
 }
 
 #include <cmath>
-#include "breakout_paa5100/breakout_paa5100.hpp"
+#include "pimoroni-pico/libraries/breakout_paa5100/breakout_paa5100.hpp"
 #include "pico/multicore.h"
 
 //cs        = SPI_BG_FRONT_CS  = GPIO17;

@@ -1,0 +1,3 @@
+[submodule "uros_BNO085/BNO08x_Pico_Library"]
+	path = uros_BNO085/BNO08x_Pico_Library
+	url = https://github.com/robotcopper/BNO08x_Pico_Library.git

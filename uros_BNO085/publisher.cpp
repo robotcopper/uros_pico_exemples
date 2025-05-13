@@ -8,26 +8,25 @@ extern "C" {
 #include <rclc/executor.h> // Executor for ROS 2
 #include <rmw_microros/rmw_microros.h> // Middleware for micro-ROS
 
-#include "std_msgs/msg/string.h" // Standard String message for ROS 2
 #include "sensor_msgs/msg/imu.h"
 
 #include "pico_uart_transports.h" // UART transport specific for Pico
 }
 
-// #include <string> // Include the standard C++ string library
 #include <utils.h>
 #include <bno08x.h>
+
 
 constexpr uint LED_PIN = PICO_DEFAULT_LED_PIN; // Define the LED pin number
 
 rcl_publisher_t publisher; // Declare the ROS 2 publisher
-std_msgs__msg__String publisher_msg; // Declare the ROS 2 message
+sensor_msgs__msg__Imu publisher_msg; // Declare the ROS 2 message
 
 bool message_send = false; // Flag for message sending
 
 const char * publisher_topic_name = "pico_publisher_topic";
 const char * node_name = "pico_node";
-const int frec = 50; //publication frequency in Hz
+const int frec = 100; //publication frequency in Hz
 
 char quaternion_str[100];
 BNO08x IMU;
@@ -49,43 +48,62 @@ rclc_executor_t executor; // Declare the ROS 2 executor
 #define CHECK_RET(ret) if (ret != RCL_RET_OK) { rcl_reset_error(); } // Macro for silent error handling
 
 // void getLatestHeading(float& i, float& j, float& k, float& real, float& radAccuracy, uint8_t& accuracy) 
-void getLatestHeading(float& heading,float& heading2,float& heading3,float& heading4){
+void getLatestHeading(float& x,float& y,float& z,float& w,float& RadAccuracy,float& AngularVel_x,float& AngularVel_y,float& AngularVel_z,float& LinAccel_x,float& LinAccel_y,float& LinAccel_z){
     // If possible, update the heading with the latest from the IMU
     if (IMU.getSensorEvent() == true) {
         if (IMU.getSensorEventID() == SENSOR_REPORTID_ROTATION_VECTOR) {
-            heading = IMU.getQuatI();
-            heading2 = IMU.getQuatJ();
-            heading3 = IMU.getQuatK();
-            heading4 = IMU.getQuatReal();
-
-            // IMU.getQuat(i, j, k, real, radAccuracy, accuracy);
+            x = IMU.getQuatI();
+            y = IMU.getQuatJ();
+            z = IMU.getQuatK();
+            w = IMU.getQuatReal();
+            RadAccuracy = IMU.getQuatRadianAccuracy();
+            AngularVel_x = IMU.getGyroX();
+            AngularVel_y = IMU.getGyroY();
+            AngularVel_z = IMU.getGyroZ();
+            LinAccel_x = IMU.getLinAccelX();
+            LinAccel_y = IMU.getLinAccelY();
+            LinAccel_z = IMU.getLinAccelZ();
         }
     }
 }
 
 void publisher_content(rcl_timer_t *timer, int64_t last_call_time) {
 
-    float heading = 0.0f;
-    float heading2 = 0.0f;
-    float heading3 = 0.0f;
-    float heading4 = 0.0f;
+    publisher_msg.header.stamp.sec = (uint16_t)(rmw_uros_epoch_millis()/1000);
+    publisher_msg.header.stamp.nanosec = (uint32_t)rmw_uros_epoch_nanos();
 
-    getLatestHeading(heading,heading2,heading3,heading4);
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float w = 0.0f;
+    float RadAccuracy = 0.0f;
+    float AngularVel_x = 0.0f;
+    float AngularVel_y = 0.0f;
+    float AngularVel_z = 0.0f;
+    float LinAccel_x = 0.0f;
+    float LinAccel_y = 0.0f;
+    float LinAccel_z = 0.0f;
+    getLatestHeading(x,y,z,w,RadAccuracy,AngularVel_x,AngularVel_y,AngularVel_z,LinAccel_x,LinAccel_y,LinAccel_z);
 
-    // float i = 0.0f;
-    // float j = 0.0f;
-    // float k = 0.0f;
-    // float real = 0.0f;
-    // float radAccuracy = 0.0f;
-    // uint8_t accuracy = 0;
-    // // IMU.getQuat(i, j, k, real, radAccuracy, accuracy);
-    // getLatestHeading(i, j, k, real, radAccuracy, accuracy);
-    
-    // snprintf(quaternion_str, sizeof(quaternion_str), "i: %f, j: %f, k: %f, real: %f, radAccuracy: %f, accuracy: %d",i,j,k,real,radAccuracy,accuracy);
-    snprintf(quaternion_str, sizeof(quaternion_str), "data: %f, J: %f, K: %f,real: %f",heading, heading2, heading3,heading4);
-    publisher_msg.data.data = quaternion_str;
-    publisher_msg.data.size = strlen(quaternion_str); 
-    publisher_msg.data.capacity = publisher_msg.data.size + 1; 
+    publisher_msg.orientation.x = x;
+    publisher_msg.orientation.y = y;
+    publisher_msg.orientation.z = z;
+    publisher_msg.orientation.w = w;
+    double orientation_covariance[9] = {
+        RadAccuracy * RadAccuracy, 0.0, 0.0,
+        0.0, RadAccuracy * RadAccuracy, 0.0,
+        0.0, 0.0, RadAccuracy * RadAccuracy
+    };
+    for (int i = 0; i < 9; ++i) {
+        publisher_msg.orientation_covariance[i] = orientation_covariance[i];
+    }
+    publisher_msg.angular_velocity.x = AngularVel_x;
+    publisher_msg.angular_velocity.y = AngularVel_y;
+    publisher_msg.angular_velocity.z = AngularVel_z;
+    publisher_msg.linear_acceleration.x = LinAccel_x;
+    publisher_msg.linear_acceleration.y = LinAccel_y;
+    publisher_msg.linear_acceleration.z = LinAccel_z;
+
     rcl_ret_t ret = rcl_publish(&publisher, &publisher_msg, NULL); 
     CHECK_RET(ret); 
 
@@ -113,7 +131,7 @@ void createEntities() {
     ret = rclc_publisher_init_default(
             &publisher,
             &node,
-            ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+            ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
             publisher_topic_name); // Initialize the publisher
     CHECK_RET(ret); // Check and handle the return value
     
@@ -209,6 +227,7 @@ int main() {
     gpio_init(LED_PIN); // Initialize the LED pin
     gpio_set_dir(LED_PIN, GPIO_OUT); // Set the LED pin direction to output
 
+
     i2c_inst_t* i2c_port0;
     initI2C(i2c_port0, false);
     //set up IMU
@@ -218,6 +237,33 @@ int main() {
         sleep_ms(1000);
     }
     IMU.enableRotationVector();
+
+    //initialisation of message constants
+    rosidl_runtime_c__String str;
+    char frame_id[100] = "bno085_imu";
+    str.data = frame_id;
+    str.size = strlen(str.data);
+    str.capacity = str.size + 1;
+    publisher_msg.header.frame_id = str;
+    float AngularVelAccuracy = 0.054105; // 3.1°/s Gyro datasheet nominal accuracy in rad/s
+    double angular_velocity_covariance[9] = {
+        AngularVelAccuracy * AngularVelAccuracy, 0.0, 0.0,
+        0.0, AngularVelAccuracy * AngularVelAccuracy, 0.0,
+        0.0, 0.0, AngularVelAccuracy * AngularVelAccuracy
+    };
+    for (int i = 0; i < 9; ++i) {
+        publisher_msg.angular_velocity_covariance[i] = angular_velocity_covariance[i];
+    }
+    float LinAccelAccuracy = 0.35; // 0.35 m/s^2 datasheet nominal accuracy
+    double linear_acceleration_covariance[9] = {
+        LinAccelAccuracy * LinAccelAccuracy, 0.0, 0.0,
+        0.0, LinAccelAccuracy * LinAccelAccuracy, 0.0,
+        0.0, 0.0, LinAccelAccuracy * LinAccelAccuracy
+    };
+    for (int i = 0; i < 9; ++i) {
+        publisher_msg.linear_acceleration_covariance[i] = linear_acceleration_covariance[i];
+    }
+
 
     allocator = rcl_get_default_allocator(); // Get the default memory allocator
     state = WAITING_AGENT; // Initialize the state to WAITING_AGENT

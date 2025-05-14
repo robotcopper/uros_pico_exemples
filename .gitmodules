@@ -10,3 +10,6 @@
 [submodule "uros_PAA5160/PAA5160E1_Pico_Library"]
 	path = uros_PAA5160/PAA5160E1_Pico_Library
 	url = https://github.com/robotcopper/PAA5160E1_Pico_Library.git
+[submodule "uros_PAA5160_pub_Motor_sub/PAA5160E1_Pico_Library"]
+	path = uros_PAA5160_pub_Motor_sub/PAA5160E1_Pico_Library
+	url = https://github.com/robotcopper/PAA5160E1_Pico_Library.git

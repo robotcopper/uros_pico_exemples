@@ -24,7 +24,7 @@ add_executable(main
 )
         
 add_subdirectory(
-	Qwiic_OTOS_Library
+	PAA5160E1_Pico_Library
 )
 
 # Link the necessary libraries to the "main" executable

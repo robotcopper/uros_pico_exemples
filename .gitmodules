@@ -7,3 +7,6 @@
 [submodule "uros_PAA5100_pub_Motor_sub/pimoroni-pico"]
 	path = uros_PAA5100_pub_Motor_sub/pimoroni-pico
 	url = https://github.com/pimoroni/pimoroni-pico.git
+[submodule "uros_PAA5160/PAA5160E1_Pico_Library"]
+	path = uros_PAA5160/PAA5160E1_Pico_Library
+	url = https://github.com/robotcopper/PAA5160E1_Pico_Library.git

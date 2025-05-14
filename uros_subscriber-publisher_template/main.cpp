@@ -1,27 +1,35 @@
-
 #include <stdio.h>
-#include "pico/stdlib.h"
+#include "pico/stdlib.h" // Include the standard library for Raspberry Pi Pico
 
-#include <time.h>
-extern"C"{
-#include <rcl/rcl.h>
-#include <rcl/error_handling.h>
-#include <rclc/rclc.h>
-#include <rclc/executor.h>
-#include <rmw_microros/rmw_microros.h>
+extern "C" {
+#include <rcl/rcl.h> // Main ROS 2 client library
+#include <rcl/error_handling.h> // Error handling for ROS 2
+#include <rclc/rclc.h> // C library for ROS 2
+#include <rclc/executor.h> // Executor for ROS 2
+#include <rmw_microros/rmw_microros.h> // Middleware for micro-ROS
 
-#include "robot_msg/msg/motor_msgs.h"
+#include "std_msgs/msg/string.h" // Standard String message for ROS 2
 
-#include "pico_uart_transports.h"
+#include "pico_uart_transports.h" // UART transport specific for Pico
 }
 
+#include <string> // Include the standard C++ string library
 
-const uint LED_PIN = PICO_DEFAULT_LED_PIN;
+constexpr uint LED_PIN = PICO_DEFAULT_LED_PIN; // Define the LED pin number
 
-rcl_publisher_t publisher;
-robot_msg__msg__MotorMsgs publisher_msg;
-robot_msg__msg__MotorMsgs subscriber_msg;
+rcl_publisher_t publisher; // Declare the ROS 2 publisher
+rcl_subscription_t subscriber; // Declare the ROS 2 subscriber
+std_msgs__msg__String publisher_msg; // Declare the ROS 2 message
+std_msgs__msg__String subscriber_msg; // Declare the ROS 2 message
 
+bool message_send = false; // Flag for message sending
+
+const char * publisher_topic_name = "pico_publisher_topic";
+const char * subscriber_topic_name = "pico_subscriber_topic";
+const char * node_name = "pico_node";
+#define ARRAY_LEN 200
+
+// Define the states
 enum states {
   WAITING_AGENT,
   AGENT_AVAILABLE,
@@ -29,149 +37,176 @@ enum states {
   AGENT_DISCONNECTED
 } state;
 
-rcl_timer_t timer;
-rcl_node_t node;
-rcl_allocator_t allocator;
-rclc_support_t support;
-rclc_executor_t executor;
+rcl_node_t node; // Declare the ROS 2 node
+rcl_allocator_t allocator; // Declare the memory allocator
+rclc_support_t support; // Declare the ROS 2 support
+rclc_executor_t executor; // Declare the ROS 2 executor
 
-const char * subscriber_topic_name = "motor_speeds";
-rcl_subscription_t subscriber;
+#define CHECK_RET(ret) if (ret != RCL_RET_OK) { rcl_reset_error(); } // Macro for silent error handling
+
+void publisher_content() {
+
+    publisher_msg.data.data = const_cast<char *>("Hello F.Jousselin from Pico!"); // Directly assign the C string
+    publisher_msg.data.size = strlen(publisher_msg.data.data); // Set the size of the string
+    publisher_msg.data.capacity = publisher_msg.data.size + 1; // Set the capacity of the string
+    
+    rcl_ret_t ret = rcl_publish(&publisher, &publisher_msg, NULL); // Publish the message
+    CHECK_RET(ret); // Check and handle the return value
+
+    message_send = true; // Set the flag indicating the message was sent
+    gpio_put(LED_PIN, 1); // Turn on the LED
+}
 
 void subscription_callback(const void * msgin){
-    const robot_msg__msg__MotorMsgs * msg = (const robot_msg__msg__MotorMsgs *)msgin;
-    if (msg->motor1 == 0.0){
-    	gpio_put(LED_PIN, 1);
-    }
-    else{
-    	gpio_put(LED_PIN, 0);
-    }
+    const std_msgs__msg__String * msg = (const std_msgs__msg__String *)msgin;
+    
+    publisher_content(); // Send content if connected
+    
 }
 
-void timer_callback(rcl_timer_t *timer, int64_t last_call_time){
-	publisher_msg.motor1 = 10;
-	publisher_msg.motor2 = 20;
-	rcl_ret_t ret = rcl_publish(&publisher, &publisher_msg, NULL);
+bool pingAgent() {
+    const int timeout_ms = 100; // Timeout of 100ms
+    const uint8_t attempts = 1; // Number of attempts
+
+    rcl_ret_t ret = rmw_uros_ping_agent(timeout_ms, attempts); // Ping the micro-ROS agent
+    return (ret == RCL_RET_OK); // Return true if ping succeeded, false otherwise
 }
 
-bool pingAgent(){
-    // Wait for agent successful ping for 2 minutes.
-    const int timeout_ms = 100;
-    const uint8_t attempts = 1;
+void createEntities() {
+    allocator = rcl_get_default_allocator(); // Get the default memory allocator
 
-    rcl_ret_t ret = rmw_uros_ping_agent(timeout_ms, attempts);
+    rcl_ret_t ret = rclc_support_init(&support, 0, NULL, &allocator); // Initialize the support
+    CHECK_RET(ret); // Check and handle the return value
 
-    if (ret != RCL_RET_OK){
-    	//gpio_put(LED_PIN, 0);
-    	return false;
-    } else {
-    	//gpio_put(LED_PIN, 1);
-    }
-    return true;
-}
+    ret = rclc_node_init_default(&node, node_name, "", &support); // Initialize the node
+    CHECK_RET(ret); // Check and handle the return value
 
-void createEntities(){
-	allocator = rcl_get_default_allocator();
-
-	rclc_support_init(&support, 0, NULL, &allocator);
-
-	rclc_node_init_default(&node, "pico_node", "", &support);
-
-	rclc_publisher_init_default(
-			&publisher,
-			&node,
-			ROSIDL_GET_MSG_TYPE_SUPPORT(robot_msg, msg, MotorMsgs),
-			"pico_publisher_topic");
-
-	rclc_timer_init_default(
-		&timer,
-		&support,
-		RCL_MS_TO_NS(1000),
-		timer_callback);
-
-	const rosidl_message_type_support_t * type_support =
-	    ROSIDL_GET_MSG_TYPE_SUPPORT(robot_msg, msg, MotorMsgs);
-	    
-	rclc_subscription_init_default(
-	        &subscriber,
-	        &node,
-	        type_support,
-	        subscriber_topic_name);
-
-	rclc_executor_init(&executor, &support.context, 2, &allocator);
-	rclc_executor_add_timer(&executor, &timer);
-
-	rclc_executor_add_subscription(&executor,
+    ret = rclc_publisher_init_default(
+            &publisher,
+            &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+            publisher_topic_name); // Initialize the publisher
+    CHECK_RET(ret); // Check and handle the return value
+    
+    ret = rclc_subscription_init_default(
+            &subscriber,
+            &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+            subscriber_topic_name); // Initialize the subscriber
+    CHECK_RET(ret); // Check and handle the return value
+    
+    ret = rclc_executor_init(&executor, &support.context, 1, &allocator);
+    CHECK_RET(ret); // Check and handle the return value
+    
+    ret = rclc_executor_add_subscription(&executor,
 			&subscriber,
 			&subscriber_msg,
 			&subscription_callback,
 			ON_NEW_DATA);
+    CHECK_RET(ret); // Check and handle the return value
+    
+    // Allocate memory for the string message
+    subscriber_msg.data.data = (char *) malloc(ARRAY_LEN * sizeof(char));
+    subscriber_msg.data.size = 0;
+    subscriber_msg.data.capacity = ARRAY_LEN;
 }
 
-void destroyEntities(){
-	rmw_context_t * rmw_context = rcl_context_get_rmw_context(&support.context);
-	(void) rmw_uros_set_context_entity_destroy_session_timeout(rmw_context, 0);
+void destroyEntities() {
+    rmw_context_t * rmw_context = rcl_context_get_rmw_context(&support.context); // Get the RMW context
+    (void) rmw_uros_set_context_entity_destroy_session_timeout(rmw_context, 0); // Set the destruction timeout
+    
+    rcl_ret_t ret;
 
-	rcl_publisher_fini(&publisher, &node);
-	rcl_subscription_fini(&subscriber, &node);
-	rcl_timer_fini(&timer);
-	rclc_executor_fini(&executor);
-	rcl_node_fini(&node);
-	rclc_support_fini(&support);
+    ret = rcl_publisher_fini(&publisher, &node); // Finalize the publisher
+    CHECK_RET(ret); // Check and handle the return value
+    
+    ret = rcl_subscription_fini(&subscriber, &node); // Finalize the subscriber
+    CHECK_RET(ret); // Check and handle the return value
+    
+    ret = rclc_executor_fini(&executor); // Finalize the executor
+    CHECK_RET(ret); // Check and handle the return value
+
+    ret = rcl_node_fini(&node); // Finalize the node
+    CHECK_RET(ret); // Check and handle the return value
+
+    ret = rclc_support_fini(&support); // Finalize the support
+    CHECK_RET(ret); // Check and handle the return value
+    
+    // Free the allocated memory for the string message
+    if (subscriber_msg.data.data) {
+        free(subscriber_msg.data.data);
+        subscriber_msg.data.data = NULL;
+    }
 }
 
-int main()
-{
-	stdio_init_all();
+void handle_state_waiting_agent() {
+    state = pingAgent() ? AGENT_AVAILABLE : WAITING_AGENT; // If ping successful, go to AGENT_AVAILABLE, otherwise stay in WAITING_AGENT
+}
+
+void handle_state_agent_available() {
+    createEntities(); // Create ROS 2 entities
+    state = AGENT_CONNECTED; // Go to AGENT_CONNECTED state
+}
+
+void handle_state_agent_connected() {
+    if (pingAgent()) {
+    	rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100)); // Execute ROS 2 executor to process messages every 100 millisecond
+    } else {
+        state = AGENT_DISCONNECTED; // If ping fails, go to AGENT_DISCONNECTED
+    }
+}
+
+void handle_state_agent_disconnected() {
+    destroyEntities(); // Destroy ROS 2 entities
+    state = WAITING_AGENT; // Return to WAITING_AGENT state
+}
+
+void state_machine() {
+    switch (state) {
+        case WAITING_AGENT:
+            handle_state_waiting_agent(); // Handle WAITING_AGENT state
+            break;
+        case AGENT_AVAILABLE:
+            handle_state_agent_available(); // Handle AGENT_AVAILABLE state
+            break;
+        case AGENT_CONNECTED:
+            handle_state_agent_connected(); // Handle AGENT_CONNECTED state
+            break;
+        case AGENT_DISCONNECTED:
+            handle_state_agent_disconnected(); // Handle AGENT_DISCONNECTED state
+            break;
+        default:
+            break;
+    }
+}
+
+int main() {
+    stdio_init_all(); // Initialize standard I/O
 
     rmw_uros_set_custom_transport(
-		true,
-		NULL,
-		pico_serial_transport_open,
-		pico_serial_transport_close,
-		pico_serial_transport_write,
-		pico_serial_transport_read
-	);
+        true,
+        NULL,
+        pico_serial_transport_open,
+        pico_serial_transport_close,
+        pico_serial_transport_write,
+        pico_serial_transport_read
+    ); // Set the custom serial transport for micro-ROS
 
-    bool pulse;
-    //gpio_init(LED_PIN);
-    //gpio_set_dir(LED_PIN, GPIO_OUT);
-    //gpio_put(LED_PIN, pulse);
+    gpio_init(LED_PIN); // Initialize the LED pin
+    gpio_set_dir(LED_PIN, GPIO_OUT); // Set the LED pin direction to output
 
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
-    //gpio_put(LED_PIN, 1);
-    //sleep_ms(500);
-    //gpio_put(LED_PIN, 0);
+    allocator = rcl_get_default_allocator(); // Get the default memory allocator
+    state = WAITING_AGENT; // Initialize the state to WAITING_AGENT
 
-    allocator = rcl_get_default_allocator();
-    state = WAITING_AGENT;
+    while (true) {
+        state_machine(); // Handle the state machine
 
-    while (true){
-    	switch (state) {
-    	    case WAITING_AGENT:
-    	      state = pingAgent() ? AGENT_AVAILABLE : WAITING_AGENT;
-    	      break;
-    	    case AGENT_AVAILABLE:
-    	      createEntities();
-    	      state = AGENT_CONNECTED ;
-    	      break;
-    	    case AGENT_CONNECTED:
-    	      state = pingAgent() ? AGENT_CONNECTED : AGENT_DISCONNECTED;
-    	      if (state == AGENT_CONNECTED) {
-    	        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100));
-    	      }
-    	      break;
-    	    case AGENT_DISCONNECTED:
-    	      destroyEntities();
-    	      state = WAITING_AGENT;
-    	      break;
-    	    default:
-    	      break;
-    	  }
-
-        pulse = ! pulse;
-        //gpio_put(LED_PIN, pulse);
+        if (message_send) {
+            message_send = false; // Reset the flag
+        } else {
+            gpio_put(LED_PIN, 0); // Turn off the LED if no new message was sent
+        }
     }
-    return 0;
+    
+    return 0; // End of the program
 }

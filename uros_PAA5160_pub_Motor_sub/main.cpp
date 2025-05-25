@@ -144,8 +144,11 @@ int velToStep(float vel){
 }
 void publisher_content(rcl_timer_t *timer, int64_t last_call_time) {
 
-    publisher_msg.header.stamp.sec = (uint16_t)(rmw_uros_epoch_millis()/1000);
-    publisher_msg.header.stamp.nanosec = (uint32_t)rmw_uros_epoch_nanos();
+    int64_t time_ns = rmw_uros_epoch_nanos();
+
+    // Convert to required format
+    publisher_msg.header.stamp.sec = (int32_t)(time_ns / 1000000000);
+    publisher_msg.header.stamp.nanosec = (uint32_t)(time_ns % 1000000000);
 
     sfe_otos_pose2d_t pos;
     myOtos.getPosition(pos);
@@ -163,14 +166,15 @@ void publisher_content(rcl_timer_t *timer, int64_t last_call_time) {
     publisher_msg.pose.pose.orientation.y = quaternion.y;
     publisher_msg.pose.pose.orientation.z = quaternion.z;
     publisher_msg.pose.pose.orientation.w = quaternion.w;
+    double fac = 1;//10e-5;
 
     double pose_covariance[36] = {
-        posStdDev.x * posStdDev.x, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, posStdDev.y * posStdDev.y, 0.0, 0.0, 0.0, 0.0,
+        posStdDev.x * posStdDev.x * fac, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, posStdDev.y * posStdDev.y * fac, 0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, posStdDev.h * posStdDev.h,
+        0.0, 0.0, 0.0, 0.0, 0.0, posStdDev.h * posStdDev.h * fac,
     };
     for (int i = 0; i < 36; ++i) {
         publisher_msg.pose.covariance[i] = pose_covariance[i];
@@ -302,6 +306,9 @@ void createEntities() {
         &subscriber_msg,
         conf
     );
+
+    // synchronize time with the agent
+    CHECK_RET(rmw_uros_sync_session(1000));
 }
 
 void destroyEntities() {
@@ -403,13 +410,13 @@ int main() {
 
     //initialisation of message constants
     rosidl_runtime_c__String frame_id_str;
-    char frame_id[100] = "odom_PAA5160";
+    char frame_id[100] = "odom_paa5160";
     frame_id_str.data = frame_id;
     frame_id_str.size = strlen(frame_id_str.data);
     frame_id_str.capacity = frame_id_str.size + 1;
     publisher_msg.header.frame_id = frame_id_str;
     rosidl_runtime_c__String child_frame_id_str;
-    char child_frame_id[100] = "PAA5160";
+    char child_frame_id[100] = "paa5160_frame";
     child_frame_id_str.data = child_frame_id;
     child_frame_id_str.size = strlen(frame_id_str.data);
     child_frame_id_str.capacity = child_frame_id_str.size + 1;

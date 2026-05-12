@@ -20,6 +20,7 @@ extern "C" {
 #include <QwiicOtos.h>
 #include <cmath>
 #include "hardware/pwm.h"
+#include "hardware/watchdog.h"
 
 QwiicOTOS myOtos;
 char str[100];
@@ -356,9 +357,16 @@ void handle_state_agent_connected() {
     }
 }
 
+// void handle_state_agent_disconnected() {
+//     destroyEntities(); // Destroy ROS 2 entities
+//     state = WAITING_AGENT; // Return to WAITING_AGENT state
+// }
+
 void handle_state_agent_disconnected() {
-    destroyEntities(); // Destroy ROS 2 entities
-    state = WAITING_AGENT; // Return to WAITING_AGENT state
+    destroyEntities();// Destroy ROS 2 entities
+    sleep_ms(500);
+    state = WAITING_AGENT;// Return to WAITING_AGENT state
+    watchdog_reboot(0, 0, 0); // reset propre
 }
 
 void state_machine() {

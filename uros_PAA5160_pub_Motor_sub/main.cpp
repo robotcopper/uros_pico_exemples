@@ -10,6 +10,7 @@ extern "C" {
 
 #include "nav_msgs/msg/odometry.h"// Standard Odom message for ROS 2
 #include "sensor_msgs/msg/joint_state.h"
+#include "std_msgs/msg/u_int8_multi_array.h"
 
 #include <micro_ros_utilities/type_utilities.h>
 #include <micro_ros_utilities/string_utilities.h>
@@ -28,14 +29,18 @@ char str[100];
 constexpr uint LED_PIN = PICO_DEFAULT_LED_PIN; // Define the LED pin number
 
 rcl_publisher_t publisher; // Declare the ROS 2 publisher
+rcl_publisher_t limit_switches_publisher; // Publisher for limit switches
 rcl_subscription_t subscriber; // Declare the ROS 2 subscriber
 nav_msgs__msg__Odometry publisher_msg; // Declare the ROS 2 message
 sensor_msgs__msg__JointState subscriber_msg; // Declare the ROS 2 message
+std_msgs__msg__UInt8MultiArray limit_switches_msg;
+uint8_t limit_switches_data[6];
 
 // bool message_send = false; // Flag for message sending
 bool message_received = false; // Flag for message reception
 
 const char * publisher_topic_name = "/odom/paa5160e1";
+const char * limit_switches_topic_name = "/limit_switches";
 const char * subscriber_topic_name = "/topic_based_joint_commands";
 const char * node_name = "pico_node";
 const int frec = 100; //publication frequency in Hz
@@ -79,6 +84,16 @@ const uint Motor2_step_pin = 10; //GPIO10 / PIN14
 const uint Motor2_dir_pin = 11; //GPIO11 / PIN15
 const uint Motor3_step_pin = 13; //GPIO13 / PIN17
 const uint Motor3_dir_pin = 14; //GPIO14 / PIN19
+
+// Limit switches GPIO pins (read HIGH when triggered: switch closes to 3.3V)
+const uint LimitSwitch_pins[6] = {
+    20, // Int11 — switch 1, signal A (GPIO20 / PIN26)
+    21, // Int12 — switch 1, signal B (GPIO21 / PIN27)
+    18, // Int21 — switch 2, signal A (GPIO18 / PIN24)
+    19, // Int22 — switch 2, signal B (GPIO19 / PIN25)
+    16, // Int31 — switch 3, signal A (GPIO16 / PIN21)
+    17, // Int32 — switch 3, signal B (GPIO17 / PIN22)
+};
 
 static micro_ros_utilities_memory_conf_t conf = micro_ros_utilities_memory_conf_default;
 
@@ -200,8 +215,14 @@ void publisher_content(rcl_timer_t *timer, int64_t last_call_time) {
         publisher_msg.twist.covariance[i] = twist_covariance[i];
     }
 
-    rcl_ret_t ret = rcl_publish(&publisher, &publisher_msg, NULL); 
-    CHECK_RET(ret); 
+    rcl_ret_t ret = rcl_publish(&publisher, &publisher_msg, NULL);
+    CHECK_RET(ret);
+
+    for (int i = 0; i < 6; ++i) {
+        limit_switches_msg.data.data[i] = gpio_get(LimitSwitch_pins[i]) ? 1 : 0;
+    }
+    ret = rcl_publish(&limit_switches_publisher, &limit_switches_msg, NULL);
+    CHECK_RET(ret);
 
     // message_send = true; // Set the flag indicating the message was sent
     // gpio_put(LED_PIN, 1); // Turn on the LED
@@ -270,7 +291,14 @@ void createEntities() {
             ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry),
             publisher_topic_name); // Initialize the publisher
     CHECK_RET(ret); // Check and handle the return value
-    
+
+    ret = rclc_publisher_init_default(
+            &limit_switches_publisher,
+            &node,
+            ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt8MultiArray),
+            limit_switches_topic_name);
+    CHECK_RET(ret);
+
     int period_ms = 1000 / frec;
     rclc_timer_init_default(
 		&timer,
@@ -320,7 +348,10 @@ void destroyEntities() {
 
     ret = rcl_publisher_fini(&publisher, &node); // Finalize the publisher
     CHECK_RET(ret); // Check and handle the return value
-    
+
+    ret = rcl_publisher_fini(&limit_switches_publisher, &node);
+    CHECK_RET(ret);
+
     ret = rcl_subscription_fini(&subscriber, &node); // Finalize the subscriber
     CHECK_RET(ret); // Check and handle the return value
     
@@ -453,10 +484,31 @@ int main() {
     gpio_set_dir(Motor3_step_pin, GPIO_OUT);
     gpio_set_function(Motor3_step_pin, GPIO_FUNC_PWM);
     /*###########################*/
+
+
+    /*###########################*/
+    for (int i = 0; i < 6; ++i) {
+        gpio_init(LimitSwitch_pins[i]);
+        gpio_set_dir(LimitSwitch_pins[i], GPIO_IN);
+        gpio_pull_down(LimitSwitch_pins[i]);
+    }
+    limit_switches_msg.data.data = limit_switches_data;
+    limit_switches_msg.data.size = 6;
+    limit_switches_msg.data.capacity = 6;
+    limit_switches_msg.layout.dim.data = NULL;
+    limit_switches_msg.layout.dim.size = 0;
+    limit_switches_msg.layout.dim.capacity = 0;
+    limit_switches_msg.layout.data_offset = 0;
+    /*###########################*/
     
 
     allocator = rcl_get_default_allocator(); // Get the default memory allocator
     state = WAITING_AGENT; // Initialize the state to WAITING_AGENT
+
+    // Hardware watchdog : 5s timeout, pause si debug halt.
+    // Enable APRÈS la calibration IMU (sinon le watchdog fire pendant calib).
+    // Si la main loop ne caresse plus le chien pendant 5s -> hard reboot.
+    watchdog_enable(5000, 1);
 
     while (true) {
         state_machine(); // Handle the state machine
@@ -466,6 +518,9 @@ int main() {
         } else {
             gpio_put(LED_PIN, 0); // Turn off the LED if no new message was sent
         }
+        
+        // Pet the watchdog : le code tourne encore
+        watchdog_update();
     }
     
     return 0; // End of the program
